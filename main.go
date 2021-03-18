@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -17,12 +16,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-//----- GLOBAL VARIABLES -------------
+//--------GLOBAL VARIABLES---------------
+
 var db *sql.DB
 var router *mux.Router
 var secretkey string = "secretkeyjwt"
 
-//--------STRUCTS---------------------
+//------------STRUCTS---------------------
 
 type User struct {
 	gorm.Model
@@ -48,7 +48,7 @@ type Error struct {
 	Message string `json:"message"`
 }
 
-//----------DATABASE FUNCTIONS---------------------
+//-------------DATABASE FUNCTIONS---------------------
 
 //GetDatabase - returns database connection
 func GetDatabase() *gorm.DB {
@@ -88,9 +88,9 @@ func Closedatabase(connection *gorm.DB) {
 	sqldb.Close()
 }
 
-//-----------------------------------------------
+//---------------------------------------------------
 
-//----------HELPER FUNCTIONS---------------------
+//--------------HELPER FUNCTIONS---------------------
 
 //SetError - set error message in Error struct
 func SetError(err Error, message string) Error {
@@ -99,18 +99,125 @@ func SetError(err Error, message string) Error {
 	return err
 }
 
+//GeneratehashPassword - take password as input and generate new hash password from it
 func GeneratehashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	return string(bytes), err
 }
 
+//CheckPasswordHash - compare plain password with hash password
 func CheckPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
 }
 
-//-----------------------------------------------
+//GenerateJWT - Generate token
+func GenerateJWT(email, role string) (string, error) {
+	var mySigningKey = []byte(secretkey)
+	token := jwt.New(jwt.SigningMethodHS256)
+	claims := token.Claims.(jwt.MapClaims)
 
+	claims["authorized"] = true
+	claims["email"] = email
+	claims["role"] = role
+	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
+
+	tokenString, err := token.SignedString(mySigningKey)
+
+	if err != nil {
+		fmt.Errorf("Something Went Wrong: %s", err.Error())
+		return "", err
+	}
+
+	return tokenString, nil
+}
+
+//--------------------------------------------------------------
+
+//---------------------MIDDLEWARE FUNCTION-----------------------
+
+//IsAuthorized - check whether user is authorized or not
+func IsAuthorized(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Header["Token"] == nil {
+			var err Error
+			err = SetError(err, "No Token Found")
+			json.NewEncoder(w).Encode(err)
+			return
+		}
+
+		var mySigningKey = []byte(secretkey)
+
+		token, err := jwt.Parse(r.Header["Token"][0], func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("There was an error in parsing")
+			}
+			return mySigningKey, nil
+		})
+
+		if err != nil {
+			var err Error
+			err = SetError(err, "Your Token has been expired")
+			json.NewEncoder(w).Encode(err)
+			return
+		}
+
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			if claims["role"] == "admin" {
+
+				r.Header.Set("Role", "admin")
+				handler.ServeHTTP(w, r)
+				return
+
+			} else if claims["role"] == "user" {
+
+				r.Header.Set("Role", "user")
+				handler.ServeHTTP(w, r)
+				return
+
+			}
+		}
+		var reserr Error
+		reserr = SetError(reserr, "Not Authorized")
+		json.NewEncoder(w).Encode(err)
+	}
+}
+
+//-----------------------------------------------------------
+
+//----------------------ROUTES-------------------------------
+//CreateRouter is router creation
+func CreateRouter() {
+	router = mux.NewRouter()
+}
+
+//InitializeRoute is add routes
+func InitializeRoute() {
+	router.HandleFunc("/signup", SignUp).Methods("POST")
+	router.HandleFunc("/signin", SignIn).Methods("POST")
+	router.HandleFunc("/admin", IsAuthorized(AdminIndex)).Methods("GET")
+	router.HandleFunc("/user", IsAuthorized(UserIndex)).Methods("GET")
+	router.HandleFunc("/", Index).Methods("GET")
+	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Access-Control-Request-Headers, Access-Control-Request-Method, Connection, Host, Origin, User-Agent, Referer, Cache-Control, X-header")
+	})
+}
+
+//ServerStart is start server
+func ServerStart() {
+	fmt.Println("Server started at http://localhost:8080")
+	err := http.ListenAndServe(":8080", handlers.CORS(handlers.AllowedHeaders([]string{"X-Requested-With", "Access-Control-Allow-Origin", "Content-Type", "Authorization"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}), handlers.AllowedOrigins([]string{"*"}))(router))
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+//-----------------------------------------------------------
+
+//----------------------ROUTES HANDLER-----------------------
 func SignUp(w http.ResponseWriter, r *http.Request) {
 
 	connection := GetDatabase()
@@ -203,74 +310,6 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(token)
 }
 
-func GenerateJWT(email, role string) (string, error) {
-	secretkey := os.Getenv("SECRET_KEY")
-	var mySigningKey = []byte(secretkey)
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-
-	claims["authorized"] = true
-	claims["email"] = email
-	claims["role"] = role
-	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
-
-	tokenString, err := token.SignedString(mySigningKey)
-
-	if err != nil {
-		fmt.Errorf("Something Went Wrong: %s", err.Error())
-		return "", err
-	}
-
-	return tokenString, nil
-}
-
-func IsAuthorized(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		if r.Header["Token"] == nil {
-			var err Error
-			err = SetError(err, "No Token Found")
-			json.NewEncoder(w).Encode(err)
-			return
-		}
-
-		var mySigningKey = []byte(secretkey)
-
-		token, err := jwt.Parse(r.Header["Token"][0], func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("There was an error in parsing")
-			}
-			return mySigningKey, nil
-		})
-
-		if err != nil {
-			var err Error
-			err = SetError(err, "Your Token has been expired")
-			json.NewEncoder(w).Encode(err)
-			return
-		}
-
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			if claims["role"] == "admin" {
-
-				r.Header.Set("Role", "admin")
-				handler.ServeHTTP(w, r)
-				return
-
-			} else if claims["role"] == "user" {
-
-				r.Header.Set("Role", "user")
-				handler.ServeHTTP(w, r)
-				return
-
-			}
-		}
-		var reserr Error
-		reserr = SetError(reserr, "Not Authorized")
-		json.NewEncoder(w).Encode(err)
-	}
-}
-
 func Index(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("HOME PUBLIC INDEX PAGE"))
 }
@@ -291,33 +330,7 @@ func UserIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("User INDEX PAGE"))
 }
 
-//CreateRouter is router creation
-func CreateRouter() {
-	router = mux.NewRouter()
-}
-
-//InitializeRoute is add routes
-func InitializeRoute() {
-	router.HandleFunc("/signup", SignUp).Methods("POST")
-	router.HandleFunc("/signin", SignIn).Methods("POST")
-	router.HandleFunc("/admin", IsAuthorized(AdminIndex)).Methods("GET")
-	router.HandleFunc("/user", IsAuthorized(UserIndex)).Methods("GET")
-	router.HandleFunc("/", Index).Methods("GET")
-	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Access-Control-Request-Headers, Access-Control-Request-Method, Connection, Host, Origin, User-Agent, Referer, Cache-Control, X-header")
-	})
-}
-
-//ServerStart is start server
-func ServerStart() {
-	fmt.Println("Server started at http://localhost:8080")
-	err := http.ListenAndServe(":8080", handlers.CORS(handlers.AllowedHeaders([]string{"X-Requested-With", "Access-Control-Allow-Origin", "Content-Type", "Authorization"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}), handlers.AllowedOrigins([]string{"*"}))(router))
-	if err != nil {
-		log.Fatal(err)
-	}
-}
+//-----------------------------------------------------------
 
 func main() {
 	Initialmigration()
