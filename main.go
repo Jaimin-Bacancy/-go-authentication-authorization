@@ -234,7 +234,7 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var dbuser User
-	connection.Where("email = 	?", user.Email).First(&dbuser)
+	connection.Where("email = ?", user.Email).First(&dbuser)
 
 	//check email is alredy register or not
 	if dbuser.Email != "" {
