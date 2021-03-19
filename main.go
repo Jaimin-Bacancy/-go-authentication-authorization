@@ -17,8 +17,10 @@ import (
 
 //--------GLOBAL VARIABLES---------------
 
-var router *mux.Router
-var secretkey string = "secretkeyjwt"
+var (
+  router *mux.Router
+  secretkey string = "secretkeyjwt"
+)
 
 //------------STRUCTS---------------------
 
@@ -48,65 +50,62 @@ type Error struct {
 
 //-------------DATABASE FUNCTIONS---------------------
 
-//GetDatabase - returns database connection
+//returns database connection
 func GetDatabase() *gorm.DB {
 	databasename := "userdb"
 	database := "postgres"
 	databasepassword := "1312"
 	databaseurl := "postgres://postgres:" + databasepassword + "@localhost/" + databasename + "?sslmode=disable"
+
 	connection, err := gorm.Open(database, databaseurl)
 	if err != nil {
-		log.Fatalln("wrong database url")
+		log.Fatalln("Invalid database url")
 	}
-
 	sqldb := connection.DB()
 
 	err = sqldb.Ping()
 	if err != nil {
-		log.Fatal("database connected")
+		log.Fatal("Database connected")
 	}
-
-	fmt.Println("connected to database")
+	fmt.Println("Database connection successful.")
 	return connection
 }
 
-//Initialmigration - create user table in userdb
-func Initialmigration() {
+//create user table in userdb
+func InitialMigration() {
 	connection := GetDatabase()
-	defer Closedatabase(connection)
+	defer CloseDatabase(connection)
 	connection.AutoMigrate(User{})
 }
 
-//Closedatabase - closes database connection
-func Closedatabase(connection *gorm.DB) {
+//closes database connection
+func CloseDatabase(connection *gorm.DB) {
 	sqldb := connection.DB()
 	sqldb.Close()
 }
 
-//---------------------------------------------------
-
 //--------------HELPER FUNCTIONS---------------------
 
-//SetError - set error message in Error struct
+//set error message in Error struct
 func SetError(err Error, message string) Error {
 	err.IsError = true
 	err.Message = message
 	return err
 }
 
-//GeneratehashPassword - take password as input and generate new hash password from it
+//take password as input and generate new hash password from it
 func GeneratehashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	return string(bytes), err
 }
 
-//CheckPasswordHash - compare plain password with hash password
+//compare plain password with hash password
 func CheckPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
 }
 
-//GenerateJWT - Generate token
+//Generate JWT token
 func GenerateJWT(email, role string) (string, error) {
 	var mySigningKey = []byte(secretkey)
 	token := jwt.New(jwt.SigningMethodHS256)
@@ -118,18 +117,16 @@ func GenerateJWT(email, role string) (string, error) {
 
 	tokenString, err := token.SignedString(mySigningKey)
 	if err != nil {
-		fmt.Errorf("Something Went Wrong: %s", err.Error())
+		fmt.Errorf("Something went Wrong: %s", err.Error())
 		return "", err
 	}
 
 	return tokenString, nil
 }
 
-//--------------------------------------------------------------
-
 //---------------------MIDDLEWARE FUNCTION-----------------------
 
-//IsAuthorized - check whether user is authorized or not
+//check whether user is authorized or not
 func IsAuthorized(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -144,27 +141,25 @@ func IsAuthorized(handler http.HandlerFunc) http.HandlerFunc {
 
 		token, err := jwt.Parse(r.Header["Token"][0], func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("There was an error in parsing")
+				return nil, fmt.Errorf("There was an error in parsing token.")
 			}
 			return mySigningKey, nil
 		})
 
 		if err != nil {
 			var err Error
-			err = SetError(err, "Your Token has been expired")
+			err = SetError(err, "Your Token has been expired.")
 			json.NewEncoder(w).Encode(err)
 			return
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 			if claims["role"] == "admin" {
-
 				r.Header.Set("Role", "admin")
 				handler.ServeHTTP(w, r)
 				return
 
 			} else if claims["role"] == "user" {
-
 				r.Header.Set("Role", "user")
 				handler.ServeHTTP(w, r)
 				return
@@ -172,20 +167,18 @@ func IsAuthorized(handler http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		var reserr Error
-		reserr = SetError(reserr, "Not Authorized")
+		reserr = SetError(reserr, "Not Authorized.")
 		json.NewEncoder(w).Encode(err)
 	}
 }
 
-//-----------------------------------------------------------
-
 //----------------------ROUTES-------------------------------
-//CreateRouter is router creation
+//create a mux router
 func CreateRouter() {
 	router = mux.NewRouter()
 }
 
-//InitializeRoute is add routes
+//initialize all routes 
 func InitializeRoute() {
 	router.HandleFunc("/signup", SignUp).Methods("POST")
 	router.HandleFunc("/signin", SignIn).Methods("POST")
@@ -199,7 +192,7 @@ func InitializeRoute() {
 	})
 }
 
-//ServerStart is start server
+//start the server
 func ServerStart() {
 	fmt.Println("Server started at http://localhost:8080")
 	err := http.ListenAndServe(":8080", handlers.CORS(handlers.AllowedHeaders([]string{"X-Requested-With", "Access-Control-Allow-Origin", "Content-Type", "Authorization"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}), handlers.AllowedOrigins([]string{"*"}))(router))
@@ -208,28 +201,25 @@ func ServerStart() {
 	}
 }
 
-//-----------------------------------------------------------
-
 //----------------------ROUTES HANDLER-----------------------
 func SignUp(w http.ResponseWriter, r *http.Request) {
-
 	connection := GetDatabase()
-	defer Closedatabase(connection)
+	defer CloseDatabase(connection)
 
 	var user User
-
 	err := json.NewDecoder(r.Body).Decode(&user)
 	if err != nil {
 		var err Error
-		err = SetError(err, "Error in reading body")
+		err = SetError(err, "Error in reading payload.")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(err)
 		return
 	}
+
 	var dbuser User
 	connection.Where("email = ?", user.Email).First(&dbuser)
 
-	//check email is alredy register or not
+	//check email is alredy registered or not
 	if dbuser.Email != "" {
 		var err Error
 		err = SetError(err, "Email already in use")
@@ -240,35 +230,34 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 
 	user.Password, err = GeneratehashPassword(user.Password)
 	if err != nil {
-		log.Fatalln("error in password hash")
+		log.Fatalln("Error in password hashing.")
 	}
 
 	//insert user details in database
 	connection.Create(&user)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
-
 }
 
 func SignIn(w http.ResponseWriter, r *http.Request) {
 	connection := GetDatabase()
-	defer Closedatabase(connection)
+	defer CloseDatabase(connection)
 
-	var authdetails Authentication
+	var authDetails Authentication
 
-	err := json.NewDecoder(r.Body).Decode(&authdetails)
+	err := json.NewDecoder(r.Body).Decode(&authDetails)
 	if err != nil {
 		var err Error
-		err = SetError(err, "Error in reading body")
+		err = SetError(err, "Error in reading payload.")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(err)
 		return
 	}
 
-	var authuser User
-	connection.Where("email = 	?", authdetails.Email).First(&authuser)
+	var authUser User
+	connection.Where("email = 	?", authDetails.Email).First(&authUser)
 
-	if authuser.Email == "" {
+	if authUser.Email == "" {
 		var err Error
 		err = SetError(err, "Username or Password is incorrect")
 		w.Header().Set("Content-Type", "application/json")
@@ -276,7 +265,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	check := CheckPasswordHash(authdetails.Password, authuser.Password)
+	check := CheckPasswordHash(authDetails.Password, authUser.Password)
 
 	if !check {
 		var err Error
@@ -286,7 +275,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validToken, err := GenerateJWT(authuser.Email, authuser.Role)
+	validToken, err := GenerateJWT(authUser.Email, authUser.Role)
 	if err != nil {
 		var err Error
 		err = SetError(err, "Failed to generate token")
@@ -296,8 +285,8 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var token Token
-	token.Email = authuser.Email
-	token.Role = authuser.Role
+	token.Email = authUser.Email
+	token.Role = authUser.Role
 	token.TokenString = validToken
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(token)
@@ -309,24 +298,22 @@ func Index(w http.ResponseWriter, r *http.Request) {
 
 func AdminIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Role") != "admin" {
-		w.Write([]byte("NOT AUTHORIZED"))
+		w.Write([]byte("Not authorized."))
 		return
 	}
-	w.Write([]byte("ADMIN INDEX PAGE"))
+	w.Write([]byte("Welcome, Admin."))
 }
 
 func UserIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Role") != "user" {
-		w.Write([]byte("NOT AUTHORIZED"))
+		w.Write([]byte("Not Authorized."))
 		return
 	}
-	w.Write([]byte("User INDEX PAGE"))
+	w.Write([]byte("Welcome, User."))
 }
 
-//-----------------------------------------------------------
-
 func main() {
-	Initialmigration()
+	InitialMigration()
 	CreateRouter()
 	InitializeRoute()
 	ServerStart()
