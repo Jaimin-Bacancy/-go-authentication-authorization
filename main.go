@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,7 +17,6 @@ import (
 
 //--------GLOBAL VARIABLES---------------
 
-var db *sql.DB
 var router *mux.Router
 var secretkey string = "secretkeyjwt"
 
@@ -65,7 +63,7 @@ func GetDatabase() *gorm.DB {
 
 	err = sqldb.Ping()
 	if err != nil {
-		log.Fatal("database is disconnected")
+		log.Fatal("database connected")
 	}
 
 	fmt.Println("connected to database")
@@ -74,12 +72,9 @@ func GetDatabase() *gorm.DB {
 
 //Initialmigration - create user table in userdb
 func Initialmigration() {
-
 	connection := GetDatabase()
-	connection.AutoMigrate(User{})
-
 	defer Closedatabase(connection)
-	fmt.Println("migration done")
+	connection.AutoMigrate(User{})
 }
 
 //Closedatabase - closes database connection
@@ -116,14 +111,12 @@ func GenerateJWT(email, role string) (string, error) {
 	var mySigningKey = []byte(secretkey)
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
-
 	claims["authorized"] = true
 	claims["email"] = email
 	claims["role"] = role
 	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
 
 	tokenString, err := token.SignedString(mySigningKey)
-
 	if err != nil {
 		fmt.Errorf("Something Went Wrong: %s", err.Error())
 		return "", err
