@@ -30,7 +30,7 @@ type User struct {
 	Role     string `json:"role"`
 }
 
-type Authentatication struct {
+type Authentication struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -52,8 +52,8 @@ type Error struct {
 func GetDatabase() *gorm.DB {
 	databasename := "userdb"
 	database := "postgres"
-	datbasepassword := "1312"
-	databaseurl := "postgres://postgres:" + datbasepassword + "@localhost/" + databasename + "?sslmode=disable"
+	databasepassword := "1312"
+	databaseurl := "postgres://postgres:" + databasepassword + "@localhost/" + databasename + "?sslmode=disable"
 	connection, err := gorm.Open(database, databaseurl)
 	if err != nil {
 		log.Fatalln("wrong database url")
@@ -254,7 +254,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 	connection := GetDatabase()
 	defer Closedatabase(connection)
 
-	var authdetails Authentatication
+	var authdetails Authentication
 
 	err := json.NewDecoder(r.Body).Decode(&authdetails)
 	if err != nil {
